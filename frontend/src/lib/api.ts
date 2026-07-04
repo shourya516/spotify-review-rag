@@ -55,6 +55,14 @@ export async function getReviewStats(): Promise<ReviewStats> {
   return request("/reviews/stats");
 }
 
+export async function clearAllReviews(): Promise<{ deleted: number; message: string }> {
+  return request("/reviews", { method: "DELETE" });
+}
+
+export async function deduplicateReviews(): Promise<{ duplicates_removed: number; reviews_remaining: number }> {
+  return request("/reviews/deduplicate", { method: "POST" });
+}
+
 export async function listReviews(params?: {
   source?: string;
   rating?: number;

@@ -649,6 +649,66 @@ async def list_reviews(
         )
 
 
+# ── Clear & Deduplicate endpoints ────────────────────────────────────
+
+@app.delete("/reviews", status_code=200)
+async def clear_all_reviews():
+    """Delete all reviews from the database. Fresh start."""
+    with Session(sync_engine) as db:
+        count = db.query(Review).count()
+        db.query(Review).delete()
+        db.commit()
+    logger.info("Cleared all %d reviews", count)
+    return {"deleted": count, "message": f"Deleted {count} reviews"}
+
+
+@app.post("/reviews/deduplicate", status_code=200)
+async def deduplicate_reviews():
+    """
+    Remove duplicate reviews based on content_hash.
+    Keeps the first (oldest) occurrence of each unique review.
+    """
+    with Session(sync_engine) as db:
+        # Find duplicate content_hashes
+        from sqlalchemy import func as sqla_func
+        
+        # Get all reviews grouped by content_hash, find duplicates
+        all_reviews = db.query(Review).order_by(Review.scraped_at.asc()).all()
+        
+        seen_hashes: dict[str, str] = {}  # hash -> first review id
+        duplicates_to_delete: list[str] = []
+        
+        for r in all_reviews:
+            if r.content_hash in seen_hashes:
+                duplicates_to_delete.append(r.id)
+            else:
+                seen_hashes[r.content_hash] = r.id
+        
+        # Also check near-duplicate content (same text, different hash — shouldn't happen but safety net)
+        seen_content: dict[str, str] = {}
+        for r in all_reviews:
+            if r.id in duplicates_to_delete:
+                continue
+            normalized = (r.cleaned_content or r.content).strip().lower()
+            if normalized in seen_content:
+                duplicates_to_delete.append(r.id)
+            else:
+                seen_content[normalized] = r.id
+        
+        # Delete duplicates
+        if duplicates_to_delete:
+            db.query(Review).filter(Review.id.in_(duplicates_to_delete)).delete(synchronize_session=False)
+            db.commit()
+        
+        remaining = db.query(Review).count()
+    
+    logger.info("Deduplication: removed %d duplicates, %d reviews remaining", len(duplicates_to_delete), remaining)
+    return {
+        "duplicates_removed": len(duplicates_to_delete),
+        "reviews_remaining": remaining,
+    }
+
+
 # Query / RAG
 @app.post("/query", response_model=QueryResponse)
 async def query_reviews(body: QueryRequest):

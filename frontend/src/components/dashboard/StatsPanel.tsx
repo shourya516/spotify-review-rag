@@ -5,11 +5,13 @@
  * Auto-refreshes every 15 seconds.
  */
 
+import { useState } from "react";
 import useSWR from "swr";
-import { Database, Layers, AlertCircle } from "lucide-react";
+import { Database, Layers, AlertCircle, Trash2, Copy } from "lucide-react";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
-import { getReviewStats } from "@/lib/api";
+import { getReviewStats, clearAllReviews, deduplicateReviews } from "@/lib/api";
 
 const SOURCE_LABELS: Record<string, string> = {
   play_store: "Google Play",
@@ -18,7 +20,7 @@ const SOURCE_LABELS: Record<string, string> = {
 };
 
 export function StatsPanel() {
-  const { data, error, isLoading } = useSWR("review-stats", getReviewStats, {
+  const { data, error, isLoading, mutate } = useSWR("review-stats", getReviewStats, {
     refreshInterval: 15_000,
   });
 
@@ -106,6 +108,17 @@ export function StatsPanel() {
           </p>
         </Card>
       )}
+
+      {/* ── Actions ── */}
+      <Card>
+        <h3 className="text-sm font-semibold text-spotify-muted uppercase tracking-wider mb-3">
+          Manage Data
+        </h3>
+        <div className="flex flex-wrap gap-2">
+          <DeduplicateButton onDone={() => mutate()} />
+          <ClearButton onDone={() => mutate()} />
+        </div>
+      </Card>
     </div>
   );
 }
@@ -128,5 +141,69 @@ function StatCard({
       <p className="text-xs text-spotify-muted mt-1">{label}</p>
       {sub && <p className="text-xs text-yellow-400 mt-0.5">{sub}</p>}
     </Card>
+  );
+}
+
+function DeduplicateButton({ onDone }: { onDone: () => void }) {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
+  async function handleClick() {
+    setLoading(true);
+    setResult(null);
+    try {
+      const res = await deduplicateReviews();
+      setResult(`Removed ${res.duplicates_removed} duplicates. ${res.reviews_remaining} remaining.`);
+      onDone();
+    } catch (e: unknown) {
+      setResult(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div>
+      <Button variant="secondary" size="sm" onClick={handleClick} loading={loading}>
+        <Copy className="h-3.5 w-3.5" />
+        Deduplicate
+      </Button>
+      {result && <p className="text-xs text-spotify-muted mt-1">{result}</p>}
+    </div>
+  );
+}
+
+function ClearButton({ onDone }: { onDone: () => void }) {
+  const [loading, setLoading] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+
+  async function handleClick() {
+    if (!confirm) {
+      setConfirm(true);
+      return;
+    }
+    setLoading(true);
+    try {
+      await clearAllReviews();
+      onDone();
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+      setConfirm(false);
+    }
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={handleClick}
+      loading={loading}
+      className={confirm ? "!text-red-400 !border-red-400/30 border" : ""}
+    >
+      <Trash2 className="h-3.5 w-3.5" />
+      {confirm ? "Confirm Clear All?" : "Clear All"}
+    </Button>
   );
 }
