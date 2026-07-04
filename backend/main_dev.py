@@ -655,29 +655,54 @@ async def query_reviews(body: QueryRequest):
     t0 = time.monotonic()
     top_k = body.top_k or int(os.getenv("RAG_TOP_K", "20"))
 
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine
+    import numpy as np
+
     with Session(sync_engine) as db:
-        all_reviews = db.query(Review).filter(Review.embedding.isnot(None)).all()
+        all_reviews = db.query(Review).all()
 
     if not all_reviews:
         return QueryResponse(
             question=body.question,
-            answer="No reviews with embeddings found. Trigger a scrape first.",
+            answer="No reviews found. Trigger a scrape first.",
             citations=[],
             latency_ms=0,
         )
 
-    query_vec = _fake_embedding(body.question)
-    scored = []
-    for r in all_reviews:
-        try:
-            vec = json.loads(r.embedding)
-            sim = _cosine_similarity(query_vec, vec)
-            scored.append((sim, r))
-        except Exception:
-            continue
+    # Build TF-IDF matrix from all review texts
+    texts = [r.cleaned_content or r.content for r in all_reviews]
+    
+    # Include the query as the last document so it shares the same vocabulary
+    texts_with_query = texts + [body.question]
+    
+    vectorizer = TfidfVectorizer(
+        max_features=10000,
+        stop_words="english",
+        ngram_range=(1, 2),  # unigrams + bigrams for better matching
+        min_df=2,
+    )
+    tfidf_matrix = vectorizer.fit_transform(texts_with_query)
+    
+    # Query vector is the last row
+    query_vec = tfidf_matrix[-1]
+    review_vecs = tfidf_matrix[:-1]
+    
+    # Compute cosine similarity between query and all reviews
+    similarities = sklearn_cosine(query_vec, review_vecs).flatten()
+    
+    # Get top-k indices sorted by similarity (descending)
+    top_indices = np.argsort(similarities)[::-1][:top_k]
+    
+    top = [(float(similarities[i]), all_reviews[i]) for i in top_indices if similarities[i] > 0.01]
 
-    scored.sort(key=lambda x: x[0], reverse=True)
-    top = scored[:top_k]
+    if not top:
+        return QueryResponse(
+            question=body.question,
+            answer="Could not find relevant reviews for your question. Try rephrasing.",
+            citations=[],
+            latency_ms=int((time.monotonic() - t0) * 1000),
+        )
 
     review_dicts = [
         {
