@@ -56,7 +56,7 @@ export async function getReviewStats(): Promise<ReviewStats> {
 }
 
 export async function clearAllReviews(): Promise<{ deleted: number; message: string }> {
-  return request("/reviews", { method: "DELETE" });
+  return request("/reviews/all", { method: "DELETE" });
 }
 
 export async function deduplicateReviews(): Promise<{ duplicates_removed: number; reviews_remaining: number }> {

@@ -651,15 +651,17 @@ async def list_reviews(
 
 # ── Clear & Deduplicate endpoints ────────────────────────────────────
 
-@app.delete("/reviews", status_code=200)
+@app.delete("/reviews/all", status_code=200)
 async def clear_all_reviews():
     """Delete all reviews from the database. Fresh start."""
     with Session(sync_engine) as db:
         count = db.query(Review).count()
         db.query(Review).delete()
+        # Also clear scrape jobs so the UI is clean
+        db.query(ScrapeJob).delete()
         db.commit()
     logger.info("Cleared all %d reviews", count)
-    return {"deleted": count, "message": f"Deleted {count} reviews"}
+    return {"deleted": count, "message": f"Deleted {count} reviews. Database is now empty."}
 
 
 @app.post("/reviews/deduplicate", status_code=200)
