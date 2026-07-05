@@ -449,10 +449,14 @@ def _run_scrape_sync(job_id: str, source: Optional[str], count: int):
                 logger.info("Scraping App Store via iTunes RSS API (count=%d)...", count)
                 import httpx
 
-                # iTunes RSS endpoint returns up to 50 reviews per page per country.
-                # Fetch from multiple countries in parallel for speed.
-                APP_STORE_COUNTRIES = ["us", "gb", "au", "ca", "in", "de"]
-                pages_per_country = max(1, (count // (len(APP_STORE_COUNTRIES) * 50)) + 1)
+                # iTunes RSS: max 10 pages × ~50 reviews per page per country.
+                # Use many countries to maximize unique reviews (heavy dedup expected).
+                APP_STORE_COUNTRIES = [
+                    "us", "gb", "au", "ca", "in", "de", "fr", "jp", "br", "mx",
+                    "it", "es", "nl", "se", "no", "dk", "fi", "sg", "nz", "za",
+                ]
+                # Always fetch max pages (10) — Apple caps at 10 regardless
+                pages_per_country = 10
 
                 def _fetch_itunes_country(country: str) -> list[dict]:
                     rows: list[dict] = []
@@ -489,11 +493,12 @@ def _run_scrape_sync(job_id: str, source: Optional[str], count: int):
                         except Exception as exc:
                             logger.warning("iTunes RSS [%s] page %d error: %s", country, page, exc)
                             break
+                    logger.info("iTunes RSS [%s]: %d reviews from %d pages", country, len(rows), page)
                     return rows
 
                 from concurrent.futures import ThreadPoolExecutor, as_completed
                 seen_hashes: set[str] = set()
-                with ThreadPoolExecutor(max_workers=6) as pool:
+                with ThreadPoolExecutor(max_workers=10) as pool:
                     futures = {pool.submit(_fetch_itunes_country, c): c for c in APP_STORE_COUNTRIES}
                     for future in as_completed(futures):
                         for row in future.result():
@@ -501,7 +506,7 @@ def _run_scrape_sync(job_id: str, source: Optional[str], count: int):
                             if h not in seen_hashes:
                                 seen_hashes.add(h)
                                 raw_rows.append(row)
-                logger.info("App Store (iTunes RSS): %d reviews fetched", len(seen_hashes))
+                logger.info("App Store (iTunes RSS): %d unique reviews from %d countries", len(seen_hashes), len(APP_STORE_COUNTRIES))
 
             # ── Reddit (requires credentials — skip if not configured) ─
             if "reddit" in sources:
