@@ -79,7 +79,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],  # Allow all origins (needed for Vercel → Render)
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -460,40 +460,42 @@ def _run_scrape_sync(job_id: str, source: Optional[str], count: int):
 
                 def _fetch_itunes_country(country: str) -> list[dict]:
                     rows: list[dict] = []
-                    for page in range(1, pages_per_country + 1):
-                        url = f"https://itunes.apple.com/{country}/rss/customerreviews/id=324684580/page={page}/sortby=mostrecent/json"
-                        try:
-                            resp = httpx.get(url, timeout=15.0)
-                            if resp.status_code != 200:
+                    # Fetch both "most recent" and "most helpful" — different review sets
+                    for sort_by in ["mostrecent", "mosthelpful"]:
+                        for page in range(1, pages_per_country + 1):
+                            url = f"https://itunes.apple.com/{country}/rss/customerreviews/id=324684580/page={page}/sortby={sort_by}/json"
+                            try:
+                                resp = httpx.get(url, timeout=15.0)
+                                if resp.status_code != 200:
+                                    break
+                                data = resp.json()
+                                entries = data.get("feed", {}).get("entry", [])
+                                if not entries:
+                                    break
+                                for entry in entries:
+                                    # Skip the app metadata entry
+                                    if "im:rating" not in entry:
+                                        continue
+                                    content = (entry.get("content", {}).get("label") or "").strip()
+                                    if not content or len(content) < 10:
+                                        continue
+                                    author_name = entry.get("author", {}).get("name", {}).get("label")
+                                    rating = int(entry.get("im:rating", {}).get("label", "0"))
+                                    review_id = entry.get("id", {}).get("label", "")
+                                    rows.append({
+                                        "source":          "app_store",
+                                        "author":          author_name,
+                                        "rating":          rating if rating > 0 else None,
+                                        "content":         content,
+                                        "cleaned_content": content,
+                                        "content_hash":    _sha256(content),
+                                        "external_id":     review_id,
+                                        "review_date":     datetime.now(timezone.utc),
+                                    })
+                            except Exception as exc:
+                                logger.warning("iTunes RSS [%s/%s] page %d error: %s", country, sort_by, page, exc)
                                 break
-                            data = resp.json()
-                            entries = data.get("feed", {}).get("entry", [])
-                            if not entries:
-                                break
-                            for entry in entries:
-                                # Skip the app metadata entry
-                                if "im:rating" not in entry:
-                                    continue
-                                content = (entry.get("content", {}).get("label") or "").strip()
-                                if not content or len(content) < 10:
-                                    continue
-                                author_name = entry.get("author", {}).get("name", {}).get("label")
-                                rating = int(entry.get("im:rating", {}).get("label", "0"))
-                                review_id = entry.get("id", {}).get("label", "")
-                                rows.append({
-                                    "source":          "app_store",
-                                    "author":          author_name,
-                                    "rating":          rating if rating > 0 else None,
-                                    "content":         content,
-                                    "cleaned_content": content,
-                                    "content_hash":    _sha256(content),
-                                    "external_id":     review_id,
-                                    "review_date":     datetime.now(timezone.utc),
-                                })
-                        except Exception as exc:
-                            logger.warning("iTunes RSS [%s] page %d error: %s", country, page, exc)
-                            break
-                    logger.info("iTunes RSS [%s]: %d reviews from %d pages", country, len(rows), page)
+                    logger.info("iTunes RSS [%s]: %d reviews", country, len(rows))
                     return rows
 
                 from concurrent.futures import ThreadPoolExecutor, as_completed
