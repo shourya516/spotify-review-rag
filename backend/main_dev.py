@@ -557,12 +557,16 @@ def _run_scrape_sync(job_id: str, source: Optional[str], count: int):
                 with ThreadPoolExecutor(max_workers=10) as pool:
                     futures = {pool.submit(_fetch_itunes_country, c): c for c in APP_STORE_COUNTRIES}
                     for future in as_completed(futures):
+                        if len(seen_hashes) >= count:
+                            break
                         for row in future.result():
                             h = row["content_hash"]
                             if h not in seen_hashes:
                                 seen_hashes.add(h)
                                 raw_rows.append(row)
-                logger.info("App Store (iTunes RSS): %d unique reviews from %d countries", len(seen_hashes), len(APP_STORE_COUNTRIES))
+                            if len(seen_hashes) >= count:
+                                break
+                logger.info("App Store (iTunes RSS): %d unique reviews (capped at %d)", len(seen_hashes), count)
 
             # ── Reddit (requires credentials — skip if not configured) ─
             if "reddit" in sources:
