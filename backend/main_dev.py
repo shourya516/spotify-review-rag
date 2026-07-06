@@ -620,6 +620,8 @@ def _run_scrape_sync(job_id: str, source: Optional[str], count: int):
 # ── Routes ───────────────────────────────────────────────────────────
 
 @app.get("/health")
+@app.get("/")
+@app.head("/")
 async def health():
     return {"status": "ok", "mode": "dev-sqlite"}
 
