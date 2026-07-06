@@ -729,7 +729,8 @@ async def query_reviews(body: QueryRequest):
     import numpy as np
 
     with Session(sync_engine) as db:
-        all_reviews = db.query(Review).all()
+        # Limit to 1500 most recent reviews to stay within Render's 512MB RAM
+        all_reviews = db.query(Review).order_by(Review.scraped_at.desc()).limit(1500).all()
 
     if not all_reviews:
         return QueryResponse(
@@ -746,10 +747,11 @@ async def query_reviews(body: QueryRequest):
     texts_with_query = texts + [body.question]
     
     vectorizer = TfidfVectorizer(
-        max_features=10000,
+        max_features=5000,       # reduced from 10K to save memory on Render free tier
         stop_words="english",
-        ngram_range=(1, 2),  # unigrams + bigrams for better matching
+        ngram_range=(1, 2),
         min_df=2,
+        dtype='float32',         # use float32 instead of float64 — halves memory
     )
     tfidf_matrix = vectorizer.fit_transform(texts_with_query)
     
