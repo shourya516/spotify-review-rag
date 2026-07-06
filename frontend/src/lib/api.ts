@@ -13,9 +13,7 @@ import type {
   ScrapeRequest,
 } from "./types";
 
-const BASE = typeof window !== "undefined"
-  ? (process.env.NEXT_PUBLIC_API_URL || "/api")
-  : "/api";
+const BASE = "/api";
 
 async function request<T>(
   path: string,

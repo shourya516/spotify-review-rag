@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://spotify-review-rag.onrender.com/:path*"
+    }
+  ]
+}
