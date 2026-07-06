@@ -47,7 +47,23 @@ SYNC_URL  = "sqlite:///./dev.db"
 
 async_engine = create_async_engine(ASYNC_URL, echo=False)
 AsyncSessionLocal = async_sessionmaker(async_engine, expire_on_commit=False)
-sync_engine = create_engine(SYNC_URL, echo=False)
+sync_engine = create_engine(
+    SYNC_URL,
+    echo=False,
+    connect_args={"timeout": 30, "check_same_thread": False},
+)
+
+
+# Enable WAL mode for concurrent reads during writes
+from sqlalchemy import event
+
+@event.listens_for(sync_engine, "connect")
+def _set_sqlite_pragma(dbapi_conn, connection_record):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.close()
 
 
 async def get_db():
